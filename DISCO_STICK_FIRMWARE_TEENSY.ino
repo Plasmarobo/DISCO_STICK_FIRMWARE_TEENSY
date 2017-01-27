@@ -47,7 +47,7 @@ void initializeLEDs() {
 }
 
 void handleLEDs() {
-  //FastLED.show();
+  FastLED.show();
 }
 //NOTE: Patch teensy audio library, remove reference to internal analog reference
 // GUItool: begin automatically generated code
@@ -95,7 +95,9 @@ void handleMotion() {
   accelerometer.read();
   color = CRGB(accelerometer.x, accelerometer.y, accelerometer.z);
 }
-
+uint32_t heartbeat_interval = 1000;
+uint32_t heartbeat_counter = 0;
+bool heartbeat_type = false;
 void setup() {
 #ifdef DBG_P
   Serial.begin(115200);
@@ -114,5 +116,10 @@ void loop() {
   handleAudio();
   handleMotion();
   handleLEDs();
+  if (++heartbeat_counter > heartbeat_interval) {
+    Serial.println(heartbeat_type ? "x" : "X");
+    heartbeat_type = !heartbeat_type;
+    heartbeat_counter = 0;
+  }
 }
 
