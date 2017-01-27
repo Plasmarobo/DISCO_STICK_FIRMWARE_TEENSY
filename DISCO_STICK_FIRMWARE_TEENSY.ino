@@ -27,8 +27,8 @@ AudioConnection          patchCord(adc1, fft);
 
 #define FFT_POINTS 256
 #define FFT_BUCKETS 10
-float spectra_gain[FFT_BUCKETS] = {2.0f, 2.0f, 5.0f, 5.0f, 5.0f,
-                        7.0f, 7.0f, 10.f, 10.f, 12.0f};
+float spectra_gain[FFT_BUCKETS] = {2.0f, 3.0f, 5.0f, 5.0f, 6.0f,
+                        10.0f, 11.0f, 12.f, 15.f, 18.0f};
 #define SPECTRA_HISTORY 10
 float spectra_ring_buffer[SPECTRA_HISTORY][FFT_BUCKETS];
 uint8_t spectra_index;
@@ -100,26 +100,26 @@ void initializeLEDs() {
 
   LEDS.addLeds<APA102, LED_DATA_PIN, LED_CLK_PIN, BGR, DATA_RATE_MHZ(20)>(color_buffer, N_LEDS);
   LEDS.setBrightness(20);
-  // Cylon bootup pattern
-  for(int i = 0; i < N_LEDS; i++) {
+  // bootup pattern
+  for(uint32_t i = 0; i < N_LEDS; i++) {
     color_buffer[i] = CRGB(128,0,0);
     FastLED.show();
-    delay(20);
+    delay(5);
   }
-  for(int i = 0; i < N_LEDS; i++) {
+  for(uint32_t i = 0; i < N_LEDS; i++) {
     color_buffer[i] = CRGB(0,128,0);
     FastLED.show();
-    delay(20);
+    delay(5);
   }
-  for(int i = 0; i < N_LEDS; i++) {
+  for(uint32_t i = 0; i < N_LEDS; i++) {
     color_buffer[i] = CRGB(0,0,128);
     FastLED.show();
-    delay(20);
+    delay(5);
   }
-  for(int i = 0; i < N_LEDS; i++) {
+  for(uint32_t i = 0; i < N_LEDS; i++) {
     color_buffer[i] = CRGB(0,0,0);
     FastLED.show();
-    delay(20);
+    delay(5);
   }
   FastLED.show(); 
   DBG_P("OK\n");
@@ -130,7 +130,7 @@ void handleLEDs() {
   CRGB new_color;
   for(i = 1; i < FFT_BUCKETS; ++i) {
     for(j = 0; j < PIXEL_LIMIT; ++j) { 
-      float mag =  (spectra_ring_buffer[spectra_index][(uint32_t)i] / audio_maxima) * abs(sin((2 * PI * (j /((float) PIXEL_LIMIT)) * (i + 1.0f)) + PI * ((uint32_t)i%2)));
+      float mag =  (spectra_ring_buffer[spectra_index][(uint32_t)i] / audio_maxima) * abs(sin((2 * PI * (j /((float) PIXEL_LIMIT)) * (i + 1.0f)) + ((PI / 6) * ((uint32_t)i%4))));
       new_color = CRGB(color.r * mag, color.g * mag, color.b * mag);
       color_buffer[(uint32_t)j] = new_color;
       color_buffer[N_LEDS-1-(uint32_t)j] = new_color;
