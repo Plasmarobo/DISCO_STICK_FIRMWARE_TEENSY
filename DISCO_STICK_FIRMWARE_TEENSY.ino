@@ -7,6 +7,7 @@
 #include <FastLED.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_MMA8451.h>
+#include <math.h>
 
 //Undefine this to disable serial comm
 #define DBG
@@ -16,13 +17,49 @@
   #define DBG_P(x)
 #endif
 
+//AUDIO CONSTANTS
+//NOTE: Patch teensy audio library, remove reference to internal analog reference
+// GUItool: begin automatically generated code
+AudioInputAnalog         adc1;
+AudioAnalyzeFFT256       fft;
+AudioConnection          patchCord(adc1, fft);
+// GUItool: end automatically generated code
+
+#define FFT_POINTS 256
+#define FFT_BUCKETS 10
+float spectra_gain[FFT_BUCKETS] = {2.0f, 2.0f, 5.0f, 5.0f, 5.0f,
+                        7.0f, 7.0f, 10.f, 10.f, 12.0f};
+#define SPECTRA_HISTORY 10
+float spectra_ring_buffer[SPECTRA_HISTORY][FFT_BUCKETS];
+uint8_t spectra_index;
+float audio_maxima;
+const float audio_threshold = 0.05f;
+
+//UTIL CONSTANTS
 #define HEARTBEAT_PIN 6
 uint8_t heartbeat_value;
 const float heartbeat_min = 0.0f;
 const float heartbeat_max = 140.0f;
 uint8_t heartbeat_state = 0;
 float heartbeat_counter;
-float heartbeat_intervals[] = {1500.0f, 750.0f, 1500.0f, 750.0f}; //ms
+float heartbeat_intervals[] = {1000.0f, 500.0f, 750.0f, 250.0f}; //ms
+
+//LED CONSTANTS
+const uint32_t N_LEDS = 144;
+const uint32_t PIXEL_LIMIT = N_LEDS/2;
+const uint8_t LED_CLK_PIN = 13;
+const uint8_t LED_DATA_PIN = 11;
+//CRGBArray<N_LEDS> color_buffer;
+CRGB color_buffer[N_LEDS];
+
+//ACCEL CONSTANTS
+const uint32_t ACCEL_CLK_PIN = 19;
+const uint32_t ACCEL_DATA_PIN = 18;
+#define CPU_FREQ 72000000
+#define TWI_FREQ 5000
+const uint32_t I2C_FREQ = ((CPU_FREQ / TWI_FREQ) - 16) / 2;
+Adafruit_MMA8451 accelerometer = Adafruit_MMA8451();
+CRGB color;
 
 void initializeHeartbeat() {
   pinMode(HEARTBEAT_PIN, OUTPUT);
@@ -58,13 +95,6 @@ void handleHeartbeat() {
   }
 }
 
-const uint32_t N_LEDS = 32;
-const uint32_t PIXEL_LIMIT = N_LEDS/2;
-const uint8_t LED_CLK_PIN = 13;
-const uint8_t LED_DATA_PIN = 11;
-//CRGBArray<N_LEDS> color_buffer;
-CRGB color_buffer[N_LEDS];
-
 void initializeLEDs() {
   DBG_P("LED Init\n");
 
@@ -96,21 +126,18 @@ void initializeLEDs() {
 }
 
 void handleLEDs() {
-  DBG_P("3");
+  float i, j;
+  CRGB new_color;
+  for(i = 1; i < FFT_BUCKETS; ++i) {
+    for(j = 0; j < PIXEL_LIMIT; ++j) { 
+      float mag =  (spectra_ring_buffer[spectra_index][(uint32_t)i] / audio_maxima) * abs(sin((2 * PI * (j /((float) PIXEL_LIMIT)) * (i + 1.0f)) + PI * ((uint32_t)i%2)));
+      new_color = CRGB(color.r * mag, color.g * mag, color.b * mag);
+      color_buffer[(uint32_t)j] = new_color;
+      color_buffer[N_LEDS-1-(uint32_t)j] = new_color;
+    }
+  }
   FastLED.show();
-  DBG_P("4");
 }
-
-//NOTE: Patch teensy audio library, remove reference to internal analog reference
-// GUItool: begin automatically generated code
-AudioInputAnalog         adc1;
-AudioAnalyzeFFT256       fft;
-AudioConnection          patchCord(adc1, fft);
-// GUItool: end automatically generated code
-
-#define FFT_POINTS 256
-#define FFT_BUCKETS 10
-float spectra[FFT_BUCKETS];
 
 void initializeAudio() {
   DBG_P("Audio Init\n");
@@ -119,20 +146,29 @@ void initializeAudio() {
 }
 
 void handleAudio() {
+  uint8_t bucket;
+  float local_maxima;
   if (fft.available()) {
-    for(uint8_t bucket = 0; bucket < FFT_BUCKETS; ++bucket) {
-      spectra[bucket] = fft.read(bucket);
+    for(bucket = 0; bucket < FFT_BUCKETS; ++bucket) {
+      spectra_ring_buffer[spectra_index][bucket] = spectra_gain[bucket] * fft.read(bucket);
+    }
+    ++spectra_index;
+    if (spectra_index >= SPECTRA_HISTORY) {
+      spectra_index = 0;
+    }
+    //Compute frame average maxima
+    for(uint8_t frame = 0; frame < SPECTRA_HISTORY; ++frame) {
+      local_maxima = audio_threshold;
+      for(bucket = 0; bucket < FFT_BUCKETS; ++bucket) {
+        local_maxima += spectra_ring_buffer[frame][bucket];
+      }
+      local_maxima /= FFT_BUCKETS;
+      if (audio_maxima < local_maxima) {
+        audio_maxima = local_maxima;
+      }
     }
   }
 }
-
-const uint32_t ACCEL_CLK_PIN = 19;
-const uint32_t ACCEL_DATA_PIN = 18;
-#define CPU_FREQ 72000000
-#define TWI_FREQ 5000
-const uint32_t I2C_FREQ = ((CPU_FREQ / TWI_FREQ) - 16) / 2;
-Adafruit_MMA8451 accelerometer = Adafruit_MMA8451();
-CRGB color;
 
 void initializeMotion() {
   DBG_P("Motion Init\n");
@@ -148,10 +184,11 @@ void initializeMotion() {
 }
 
 void handleMotion() {
-  DBG_P("1");
   accelerometer.read();
-  color = CRGB(accelerometer.x, accelerometer.y, accelerometer.z);
-  DBG_P("2");
+  float x = (128.0f * accelerometer.x) / 8192.0f;
+  float y = (128.0f * accelerometer.y) / 8192.0f;
+  float z = (128.0f * accelerometer.z) / 8192.0f;
+  color = CRGB(255 * x, 255 * y, 255 * z);
 }
 
 void setup() {
@@ -173,7 +210,6 @@ void loop() {
   handleAudio();
   handleMotion();
   handleLEDs();
-  DBG_P("\n");
   handleHeartbeat();
 }
 
