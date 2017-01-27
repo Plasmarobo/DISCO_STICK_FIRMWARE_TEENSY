@@ -1,5 +1,6 @@
 #include <Audio.h>
 #include <Wire.h>
+//#include <i2c_t3.h>
 #include <SPI.h>
 #include <SD.h>
 #include <SerialFlash.h>
@@ -8,13 +9,61 @@
 #include <Adafruit_MMA8451.h>
 
 //Undefine this to disable serial comm
-#define DBG_P(x) Serial.print(x)
+#define DBG
+#ifdef DBG
+  #define DBG_P(x) Serial.print(x)
+#else
+  #define DBG_P(x)
+#endif
+
+#define HEARTBEAT_PIN 6
+uint8_t heartbeat_value;
+const float heartbeat_min = 0.0f;
+const float heartbeat_max = 140.0f;
+uint8_t heartbeat_state = 0;
+float heartbeat_counter;
+float heartbeat_intervals[] = {1500.0f, 750.0f, 1500.0f, 750.0f}; //ms
+
+void initializeHeartbeat() {
+  pinMode(HEARTBEAT_PIN, OUTPUT);
+  analogWrite(HEARTBEAT_PIN, heartbeat_min);
+  heartbeat_value = heartbeat_min;
+  heartbeat_counter = (float)millis();
+}
+
+void handleHeartbeat() {
+  float amount = ((float)millis() - heartbeat_counter) / heartbeat_intervals[heartbeat_state];
+  switch(heartbeat_state) {
+    case 0: //Fade up from zero
+      analogWrite(HEARTBEAT_PIN, (uint8_t)((heartbeat_max * amount) + heartbeat_min));
+      break;
+    case 1: //Hold for one interval
+      analogWrite(HEARTBEAT_PIN, (uint8_t)(heartbeat_max + heartbeat_min));
+      break;
+    case 2: //Fade down
+      analogWrite(HEARTBEAT_PIN, (uint8_t)((heartbeat_max - (heartbeat_max * amount)) + heartbeat_min));
+      break;
+    case 3: //Hold for one interval
+      analogWrite(HEARTBEAT_PIN, (uint8_t)(heartbeat_min));
+      break;
+    default:
+      analogWrite(HEARTBEAT_PIN, 0);
+      break;
+  }
+  if (amount >= 1.0f) {
+    heartbeat_counter = millis();
+    if (++heartbeat_state > 3) {
+      heartbeat_state = 0;
+    }
+  }
+}
 
 const uint32_t N_LEDS = 32;
 const uint32_t PIXEL_LIMIT = N_LEDS/2;
 const uint8_t LED_CLK_PIN = 13;
 const uint8_t LED_DATA_PIN = 11;
-CRGBArray<N_LEDS> color_buffer;
+//CRGBArray<N_LEDS> color_buffer;
+CRGB color_buffer[N_LEDS];
 
 void initializeLEDs() {
   DBG_P("LED Init\n");
@@ -47,8 +96,11 @@ void initializeLEDs() {
 }
 
 void handleLEDs() {
+  DBG_P("3");
   FastLED.show();
+  DBG_P("4");
 }
+
 //NOTE: Patch teensy audio library, remove reference to internal analog reference
 // GUItool: begin automatically generated code
 AudioInputAnalog         adc1;
@@ -76,13 +128,17 @@ void handleAudio() {
 
 const uint32_t ACCEL_CLK_PIN = 19;
 const uint32_t ACCEL_DATA_PIN = 18;
+#define CPU_FREQ 72000000
+#define TWI_FREQ 5000
+const uint32_t I2C_FREQ = ((CPU_FREQ / TWI_FREQ) - 16) / 2;
 Adafruit_MMA8451 accelerometer = Adafruit_MMA8451();
 CRGB color;
 
 void initializeMotion() {
   DBG_P("Motion Init\n");
   Wire.begin();
-  TWBR = 152;
+  //Wire.setClock(I2C_FREQ);
+  TWBR = I2C_FREQ;
   if(accelerometer.begin()){
     accelerometer.setRange(MMA8451_RANGE_4_G);
     DBG_P("OK\n");
@@ -92,34 +148,32 @@ void initializeMotion() {
 }
 
 void handleMotion() {
+  DBG_P("1");
   accelerometer.read();
   color = CRGB(accelerometer.x, accelerometer.y, accelerometer.z);
+  DBG_P("2");
 }
-uint32_t heartbeat_interval = 1000;
-uint32_t heartbeat_counter = 0;
-bool heartbeat_type = false;
+
 void setup() {
-#ifdef DBG_P
+#ifdef DBG
   Serial.begin(115200);
   while(!Serial);
 #endif
   DBG_P("Boot\n");
 
-  initializeLEDs();
   initializeMotion();
   initializeAudio();
+  initializeLEDs();
 
   DBG_P("Entering Main Loop\n");
 }
 
 void loop() {
+
   handleAudio();
   handleMotion();
   handleLEDs();
-  if (++heartbeat_counter > heartbeat_interval) {
-    Serial.println(heartbeat_type ? "x" : "X");
-    heartbeat_type = !heartbeat_type;
-    heartbeat_counter = 0;
-  }
+  DBG_P("\n");
+  handleHeartbeat();
 }
 
