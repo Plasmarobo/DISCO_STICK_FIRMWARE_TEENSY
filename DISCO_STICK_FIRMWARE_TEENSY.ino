@@ -10,7 +10,7 @@
 #include <math.h>
 
 //Undefine this to disable serial comm
-#define DBG
+//#define DBG
 #ifdef DBG
   #define DBG_P(x) Serial.print(x)
 #else
@@ -27,8 +27,8 @@ AudioConnection          patchCord(adc1, fft);
 
 #define FFT_POINTS 256
 #define FFT_BUCKETS 10
-float spectra_gain[FFT_BUCKETS] = {2.0f, 3.0f, 5.0f, 5.0f, 6.0f,
-                        10.0f, 11.0f, 12.f, 15.f, 18.0f};
+float spectra_gain[FFT_BUCKETS] = {3.0f, 3.0f, 4.0f, 4.0f, 5.0f,
+                        5.0f, 8.0f, 10.f, 15.f, 18.0f};
 #define SPECTRA_HISTORY 10
 float spectra_ring_buffer[SPECTRA_HISTORY][FFT_BUCKETS];
 uint8_t spectra_index;
@@ -128,7 +128,7 @@ void initializeLEDs() {
 void handleLEDs() {
   float i, j;
   CRGB new_color;
-  for(i = 1; i < FFT_BUCKETS; ++i) {
+  for(i = 0; i < FFT_BUCKETS; ++i) {
     for(j = 0; j < PIXEL_LIMIT; ++j) { 
       float mag =  (spectra_ring_buffer[spectra_index][(uint32_t)i] / audio_maxima) * abs(sin((2 * PI * (j /((float) PIXEL_LIMIT)) * (i + 1.0f)) + ((PI / 6) * ((uint32_t)i%4))));
       new_color = CRGB(color.r * mag, color.g * mag, color.b * mag);
