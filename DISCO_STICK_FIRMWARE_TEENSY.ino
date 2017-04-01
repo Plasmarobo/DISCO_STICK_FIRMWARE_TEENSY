@@ -10,7 +10,7 @@
 #include <math.h>
 
 //Undefine this to disable serial comm
-//#define DBG
+#define DBG
 #ifdef DBG
   #define DBG_P(x) Serial.print(x)
 #else
@@ -27,8 +27,8 @@ AudioConnection          patchCord(adc1, fft);
 
 #define FFT_POINTS 256
 #define FFT_BUCKETS 10
-float spectra_gain[FFT_BUCKETS] = {3.0f, 3.0f, 4.0f, 4.0f, 5.0f,
-                        5.0f, 8.0f, 10.f, 15.f, 18.0f};
+float spectra_gain[FFT_BUCKETS] = {3.0f, 3.0f, 3.0f, 3.0f, 4.0f,
+                        5.0f, 7.0f, 8.0f, 10.0f, 10.0f};
 #define SPECTRA_HISTORY 10
 float spectra_ring_buffer[SPECTRA_HISTORY][FFT_BUCKETS];
 uint8_t spectra_index;
@@ -59,6 +59,11 @@ const uint32_t ACCEL_DATA_PIN = 18;
 #define TWI_FREQ 5000
 const uint32_t I2C_FREQ = ((CPU_FREQ / TWI_FREQ) - 16) / 2;
 Adafruit_MMA8451 accelerometer = Adafruit_MMA8451();
+const uint8_t MOTION_FRAMES = 10;
+int16_t x_motion_buffer[MOTION_FRAMES];
+int16_t y_motion_buffer[MOTION_FRAMES];
+int16_t z_motion_buffer[MOTION_FRAMES];
+uint8_t motion_index = 0;
 CRGB color;
 
 void initializeHeartbeat() {
@@ -97,30 +102,34 @@ void handleHeartbeat() {
 
 void initializeLEDs() {
   DBG_P("LED Init\n");
-
-  LEDS.addLeds<APA102, LED_DATA_PIN, LED_CLK_PIN, BGR, DATA_RATE_MHZ(20)>(color_buffer, N_LEDS);
+  FastLED.clear();
+  LEDS.addLeds<APA102, LED_DATA_PIN, LED_CLK_PIN, BGR, DATA_RATE_MHZ(2)>(color_buffer, N_LEDS);
   LEDS.setBrightness(20);
   // bootup pattern
   for(uint32_t i = 0; i < N_LEDS; i++) {
     color_buffer[i] = CRGB(128,0,0);
     FastLED.show();
-    delay(5);
+    delay(10);
   }
+  FastLED.clear();
   for(uint32_t i = 0; i < N_LEDS; i++) {
     color_buffer[i] = CRGB(0,128,0);
     FastLED.show();
-    delay(5);
+    delay(10);
   }
+  FastLED.clear();
   for(uint32_t i = 0; i < N_LEDS; i++) {
     color_buffer[i] = CRGB(0,0,128);
     FastLED.show();
-    delay(5);
+    delay(10);
   }
+  FastLED.clear();
   for(uint32_t i = 0; i < N_LEDS; i++) {
     color_buffer[i] = CRGB(0,0,0);
     FastLED.show();
-    delay(5);
+    delay(10);
   }
+  FastLED.clear();
   FastLED.show(); 
   DBG_P("OK\n");
 }
@@ -149,9 +158,13 @@ void handleAudio() {
   uint8_t bucket;
   float local_maxima;
   if (fft.available()) {
+    DBG_P("New Spectra: ");
     for(bucket = 0; bucket < FFT_BUCKETS; ++bucket) {
       spectra_ring_buffer[spectra_index][bucket] = spectra_gain[bucket] * fft.read(bucket);
+      DBG_P(spectra_ring_buffer[spectra_index][bucket]);
+      DBG_P(" ");
     }
+    DBG_P("\n");
     ++spectra_index;
     if (spectra_index >= SPECTRA_HISTORY) {
       spectra_index = 0;
@@ -176,7 +189,7 @@ void initializeMotion() {
   //Wire.setClock(I2C_FREQ);
   TWBR = I2C_FREQ;
   if(accelerometer.begin()){
-    accelerometer.setRange(MMA8451_RANGE_4_G);
+    accelerometer.setRange(MMA8451_RANGE_2_G);
     DBG_P("OK\n");
   } else {
     DBG_P("Failed\n");
@@ -184,11 +197,35 @@ void initializeMotion() {
 }
 
 void handleMotion() {
+  float x_delta = 0.0f;
+  float y_delta = 0.0f;
+  float z_delta = 0.0f;
+  
   accelerometer.read();
-  float x = (128.0f * accelerometer.x) / 8192.0f;
-  float y = (128.0f * accelerometer.y) / 8192.0f;
-  float z = (128.0f * accelerometer.z) / 8192.0f;
-  color = CRGB(255 * x, 255 * y, 255 * z);
+  
+  x_motion_buffer[motion_index] = accelerometer.x;
+  y_motion_buffer[motion_index] = accelerometer.y;
+  z_motion_buffer[motion_index] = accelerometer.z;
+  
+  for(uint8_t index = 0; index < MOTION_FRAMES; ++index) {
+    x_delta += x_motion_buffer[index];
+    y_delta += y_motion_buffer[index];
+    z_delta += z_motion_buffer[index];
+  }
+  
+  x_delta = x_motion_buffer[motion_index] - (x_delta / MOTION_FRAMES);
+  y_delta = y_motion_buffer[motion_index] - (y_delta / MOTION_FRAMES);
+  z_delta = z_motion_buffer[motion_index] - (z_delta / MOTION_FRAMES);
+  
+  float x = 128.0f + (128.0f * (x_delta / 2048.0f));
+  float y = 128.0f + (128.0f * (y_delta / 2048.0f));
+  float z = 128.0f + (128.0f * (z_delta / 2048.0f));
+
+  color = CRGB((uint8_t) x, (uint8_t) y, (uint8_t) z);
+  ++motion_index;
+  if (motion_index >= MOTION_FRAMES) {
+    motion_index = 0;
+  }
 }
 
 void setup() {
